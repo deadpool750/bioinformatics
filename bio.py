@@ -13,6 +13,7 @@ def maxvalue_needleman(matrix, x_pos, y_pos, match_score, mismatch_penalty, gap_
 
     matrix[x_pos][y_pos] = max(left, top, diagonal)
 
+
 def match_or_mismatch(matrix, x_pos, y_pos, match_score, mismatch_penalty):
     value = 0
     if matrix[x_pos][0] == matrix[0][y_pos]:
@@ -29,28 +30,28 @@ def traceback_needleman(matrix, match_score, mismatch_penalty, gap_penalty):
     max_length = matrix.shape[0]
     max_width = matrix.shape[1]
 
-    position_x = max_length
-    position_y = max_width
-    if position_x == 1 and position_y == 1 and matrix[position_x][position_y] == 0:
-        return path_list
-    else:
-        # moving diagonal
+    position_x = max_length - 1
+    position_y = max_width - 1
+
+    # Backtracking until we reach the first cell
+    while position_x > 1 or position_y > 1:
+        path_list.append(matrix[position_x, position_y])  # Append the matrix value (not coordinates)
+
         if matrix[position_x][position_y] == matrix[position_x - 1][position_y - 1] + match_or_mismatch(matrix,
                                                                                                         position_x,
                                                                                                         position_y,
                                                                                                         match_score,
                                                                                                         mismatch_penalty):
-            path_list.append([position_x - 1, position_y - 1])
             position_x -= 1
             position_y -= 1
-        # moving up
         elif matrix[position_x][position_y] == matrix[position_x - 1][position_y] + gap_penalty:
-            path_list.append([position_x - 1, position_y])
-            position_x -=  1
-        # moving left
+            position_x -= 1
         else:
-            path_list.append([position_x, position_y - 1])
-            position_y -=  1
+            position_y -= 1
+
+    path_list.append(matrix[1, 1])
+    return path_list[::-1]
+
 
 def generate_array(strand1, strand2, match_value, mismatch_value, gap_value):
     row_length = len(strand1) + 2
@@ -94,10 +95,12 @@ class AlignmentGUI:
         self.root.title("Welsch-Needleman Alignment")
 
         self.matrix = None
+        self.path = None
 
         # Create UI Elements
         self.create_input_fields()
         self.create_matrix_display()
+        self.create_path_display()
 
     def create_input_fields(self):
         """Creates entry fields for strands and scoring values."""
@@ -129,6 +132,11 @@ class AlignmentGUI:
         self.matrix_frame = tk.Frame(self.root)
         self.matrix_frame.grid(row=2, column=0, columnspan=7)
 
+    def create_path_display(self):
+        """Placeholder frame for path display."""
+        self.path_frame = tk.Frame(self.root)
+        self.path_frame.grid(row=3, column=0, columnspan=7)
+
     def display_matrix(self):
         """Displays the computed matrix."""
         # Clear previous matrix
@@ -140,8 +148,21 @@ class AlignmentGUI:
 
         for i in range(len(self.matrix)):
             for j in range(len(self.matrix[i])):
-                label = tk.Label(self.matrix_frame, text=str(self.matrix[i][j]), borderwidth=1, relief="solid", width=5, height=2)
+                label = tk.Label(self.matrix_frame, text=str(self.matrix[i][j]), borderwidth=1, relief="solid", width=5,
+                                 height=2)
                 label.grid(row=i, column=j, padx=2, pady=2)
+
+    def display_path(self):
+        """Displays the computed path as matrix values."""
+        for widget in self.path_frame.winfo_children():
+            widget.destroy()
+
+        if self.path is None:
+            return
+
+        path_str = '->'.join([str(val) for val in self.path])  # Join the matrix values as string
+        path_label = tk.Label(self.path_frame, text=f"Path: {path_str}")
+        path_label.grid(row=0, column=0, padx=5, pady=5)
 
     def update_matrix(self):
         try:
@@ -152,10 +173,13 @@ class AlignmentGUI:
             mismatch = int(self.mismatch_entry.get())
             gap = int(self.gap_entry.get())
 
-            print(f"Running algorithm with: Strand1={strand1}, Strand2={strand2}, Match={match}, Mismatch={mismatch}, Gap={gap}")
+            print(
+                f"Running algorithm with: Strand1={strand1}, Strand2={strand2}, Match={match}, Mismatch={mismatch}, Gap={gap}")
 
             self.matrix = generate_array(strand1, strand2, match, mismatch, gap)
+            self.path = traceback_needleman(self.matrix, match, mismatch, gap)
             self.display_matrix()
+            self.display_path()
 
         except ValueError:
             print("Please enter valid numbers for match, mismatch, and gap.")
