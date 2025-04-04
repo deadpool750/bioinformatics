@@ -1,6 +1,7 @@
 import tkinter as tk
 import numpy as np
-
+from Bio import SeqIO
+from Bio.SeqUtils import gc_fraction
 
 def maxvalue_needleman(matrix, x_pos, y_pos, match_score, mismatch_penalty, gap_penalty):
     if matrix[x_pos][0] == matrix[0][y_pos]:
@@ -26,6 +27,7 @@ def match_or_mismatch(matrix, x_pos, y_pos, match_score, mismatch_penalty):
 
 def traceback_needleman(matrix, match_score, mismatch_penalty, gap_penalty):
     path_list = []
+    path_coordinates = []
 
     max_length = matrix.shape[0]
     max_width = matrix.shape[1]
@@ -36,6 +38,7 @@ def traceback_needleman(matrix, match_score, mismatch_penalty, gap_penalty):
     # Backtracking until we reach the first cell
     while position_x > 1 or position_y > 1:
         path_list.append(matrix[position_x, position_y])  # Append the matrix value (not coordinates)
+        path_coordinates.append((position_x, position_y))  # Store the coordinates
 
         if matrix[position_x][position_y] == matrix[position_x - 1][position_y - 1] + match_or_mismatch(matrix,
                                                                                                         position_x,
@@ -49,8 +52,10 @@ def traceback_needleman(matrix, match_score, mismatch_penalty, gap_penalty):
         else:
             position_y -= 1
 
-    path_list.append(matrix[1, 1])
-    return path_list[::-1]
+    path_list.append(matrix[1, 1])  # Add the starting point value
+    path_coordinates.append((1, 1))  # Starting point coordinate
+
+    return path_list[::-1], path_coordinates[::-1]  # Reverse to get the correct order
 
 
 def generate_array(strand1, strand2, match_value, mismatch_value, gap_value):
@@ -88,6 +93,17 @@ def generate_array(strand1, strand2, match_value, mismatch_value, gap_value):
 
     return matrix
 
+def get_from_fasta_file(file_name):
+
+    sequences = []
+
+    for record in SeqIO.parse(file_name, "fasta"):
+        sequences.append(str(record.seq))
+
+    if len(sequences) != 2:
+        raise ValueError("Two values in the fasta file expected!")
+
+    return sequences[0], sequences[1]
 
 class AlignmentGUI:
     def __init__(self, root):
@@ -96,6 +112,7 @@ class AlignmentGUI:
 
         self.matrix = None
         self.path = None
+        self.path_coordinates = None
 
         # Create UI Elements
         self.create_input_fields()
@@ -148,19 +165,23 @@ class AlignmentGUI:
 
         for i in range(len(self.matrix)):
             for j in range(len(self.matrix[i])):
-                label = tk.Label(self.matrix_frame, text=str(self.matrix[i][j]), borderwidth=1, relief="solid", width=5,
-                                 height=2)
+                if (i, j) in self.path_coordinates:
+                    label = tk.Label(self.matrix_frame, text=str(self.matrix[i][j]), borderwidth=1, relief="solid", width=5,
+                                     height=2, bg="green")
+                else:
+                    label = tk.Label(self.matrix_frame, text=str(self.matrix[i][j]), borderwidth=1, relief="solid", width=5,
+                                     height=2)
                 label.grid(row=i, column=j, padx=2, pady=2)
 
     def display_path(self):
-        """Displays the computed path as matrix values."""
+        """Displays the computed path as matrix coordinates."""
         for widget in self.path_frame.winfo_children():
             widget.destroy()
 
-        if self.path is None:
+        if self.path is None or self.path_coordinates is None:
             return
 
-        path_str = '->'.join([str(val) for val in self.path])  # Join the matrix values as string
+        path_str = '->'.join([f"({p[0]},{p[1]})" for p in self.path_coordinates])  # Join the matrix coordinates as string
         path_label = tk.Label(self.path_frame, text=f"Path: {path_str}")
         path_label.grid(row=0, column=0, padx=5, pady=5)
 
@@ -177,7 +198,7 @@ class AlignmentGUI:
                 f"Running algorithm with: Strand1={strand1}, Strand2={strand2}, Match={match}, Mismatch={mismatch}, Gap={gap}")
 
             self.matrix = generate_array(strand1, strand2, match, mismatch, gap)
-            self.path = traceback_needleman(self.matrix, match, mismatch, gap)
+            self.path, self.path_coordinates = traceback_needleman(self.matrix, match, mismatch, gap)
             self.display_matrix()
             self.display_path()
 
