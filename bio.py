@@ -77,6 +77,7 @@ def traceback_needleman(matrix, match_score, mismatch_penalty, gap_penalty):
     path_list.append(matrix[0, 0])
     path_coordinates.append((0, 0))
 
+    #coordinates given in the
     return path_list, path_coordinates
 
 def generate_array(strand1, strand2, match_value, mismatch_value, gap_value):
@@ -142,6 +143,68 @@ def get_from_fasta_file(file_name):
 
     return sequences[0], sequences[1]
 
+def analyze_alignment(matrix, match_score, mismatch_penalty, gap_penalty, strand1, strand2):
+    #initializing lists to store the aligned sequences
+    aligned1 = []
+    aligned2 = []
+
+    #setting starting positions at the bottom-right of the matrix
+    i = len(strand1) + 1
+    j = len(strand2) + 1
+
+    #tracing back through the matrix until reaching the top-left corner
+    while i > 1 or j > 1:
+        #checking for a diagonal move (match or mismatch)
+        if i > 1 and j > 1:
+            match = match_score if strand1[i - 2] == strand2[j - 2] else mismatch_penalty
+            if matrix[i][j] == matrix[i - 1][j - 1] + match:
+                aligned1.append(strand1[i - 2])
+                aligned2.append(strand2[j - 2])
+                i -= 1
+                j -= 1
+                continue
+
+        #checking for a move from the top (gap in strand2)
+        if i > 1 and matrix[i][j] == matrix[i - 1][j] + gap_penalty:
+            aligned1.append(strand1[i - 2])
+            aligned2.append("-")
+            i -= 1
+            continue
+
+        #checking for a move from the left (gap in strand1)
+        if j > 1 and matrix[i][j] == matrix[i][j - 1] + gap_penalty:
+            aligned1.append("-")
+            aligned2.append(strand2[j - 2])
+            j -= 1
+            continue
+
+    #reversing the sequences to get the final alignment
+    aligned1.reverse()
+    aligned2.reverse()
+
+    #returning the aligned sequences
+    return aligned1, aligned2
+
+
+def save_alignment_to_file(filename, aligned1, aligned2, match, mismatch, gap, alignment_length, match_count, gap_count, identity_percentage):
+    """
+    saves all relevant alignment results to a text file
+    """
+
+    #structure how it should be saved into a .txt file
+    with open(filename, "w") as f:
+        f.write("Needleman-Wunsch Alignment Result\n")
+        f.write("===============================\n\n")
+        f.write("Aligned Sequences:\n")
+        f.write("Strand 1: " + ''.join(aligned1) + "\n")
+        f.write("Strand 2: " + ''.join(aligned2) + "\n\n")
+        f.write(f"Scoring:\n  Match = {match}, Mismatch = {mismatch}, Gap = {gap}\n\n")
+        f.write(f"Alignment Length: {alignment_length}\n")
+        f.write(f"Number of Matches: {match_count}\n")
+        f.write(f"Number of Gaps: {gap_count}\n")
+        f.write(f"Identity Percentage: {identity_percentage}%\n")
+
+
 class AlignmentGUI:
     """
     GUI class for visualizing the algorithm
@@ -159,6 +222,7 @@ class AlignmentGUI:
         self.create_input_fields()
         self.create_matrix_display()
         self.create_path_display()
+        self.create_result_display()
 
     def create_input_fields(self):
         """
@@ -201,6 +265,7 @@ class AlignmentGUI:
         self.fasta_entry = tk.Entry(self.root, width=20)
         self.fasta_entry.grid(row=2, column=1, columnspan=2)
 
+        #get from fasta button
         self.fasta_button = tk.Button(self.root, text="Get from FASTA", command=self.load_from_fasta)
         self.fasta_button.grid(row=2, column=3, padx=5, pady=5)
 
@@ -224,23 +289,29 @@ class AlignmentGUI:
         """
         displays the matrix and highlights the path
         """
-        #clearing previous matrix display
+
+        #removing any previously displayed matrix from the frame
         for widget in self.matrix_frame.winfo_children():
             widget.destroy()
 
+        #exiting if no matrix is available to display
         if self.matrix is None:
             return
 
-        #drawing each cell of the matrix
+        #iterating through each cell in the matrix to display it
         for i in range(len(self.matrix)):
             for j in range(len(self.matrix[i])):
-                #highlighting cells that are in the path in green
-                if (i, j) in self.path_coordinates:
+
+                #highlighting the cell if it is part of the optimal path, excluding the top-left cell
+                if (i, j) in self.path_coordinates and (i, j) != (0, 0):
                     label = tk.Label(self.matrix_frame, text=str(self.matrix[i][j]), borderwidth=1, relief="solid",
                                      width=5, height=2, bg="green")
+                #displaying a normal cell if it is not part of the path
                 else:
                     label = tk.Label(self.matrix_frame, text=str(self.matrix[i][j]), borderwidth=1, relief="solid",
                                      width=5, height=2)
+
+                #placing the label widget in the appropriate position in the grid
                 label.grid(row=i, column=j, padx=2, pady=2)
 
     def display_path(self):
@@ -256,32 +327,48 @@ class AlignmentGUI:
 
         #building a string of coordinates
         path_str = '->'.join([f"({p[0]},{p[1]})" for p in self.path_coordinates])
-        path_label = tk.Label(self.path_frame, text=f"Path: {path_str}")
+        path_label = tk.Label(self.path_frame, text=f"Path (row, column): {path_str}")
         path_label.grid(row=0, column=0, padx=5, pady=5)
 
     def update_matrix(self):
         """
-        Updates the matrix and path after clicking run button.
+        updates the matrix, path, and alignment details after clicking run button
         """
         try:
-            #getting all user inputs
+            #retrieve input values from the user interface
             strand1 = self.strand1_entry.get().upper()
             strand2 = self.strand2_entry.get().upper()
             match = int(self.match_entry.get())
             mismatch = int(self.mismatch_entry.get())
             gap = int(self.gap_entry.get())
 
-            print(f"Running algorithm with: Strand1={strand1}, Strand2={strand2}, Match={match}, Mismatch={mismatch}, Gap={gap}")
-
-            #generating matrix and path
+            #generate the scoring matrix based on the input sequences and scoring values
             self.matrix = generate_array(strand1, strand2, match, mismatch, gap)
+
+            #trace back through the matrix to find the optimal alignment path
             self.path, self.path_coordinates = traceback_needleman(self.matrix, match, mismatch, gap)
 
-            #displaying results
+            #display the updated matrix and path in the GUI
             self.display_matrix()
             self.display_path()
 
+            #perform the alignment based on the calculated path and scoring
+            aligned1, aligned2 = analyze_alignment(self.matrix, match, mismatch, gap, strand1, strand2)
+
+            #calculate alignment metrics
+            align_len = len(aligned1)
+            match_count = sum(1 for a, b in zip(aligned1, aligned2) if a == b and a != '-' and b != '-')
+            gap_count = aligned1.count('-') + aligned2.count('-')
+            identity = round((match_count / align_len) * 100, 2)
+
+            #update the GUI labels with the alignment results
+            self.align_len_label.config(text=f"Alignment Length: {align_len}")
+            self.match_count_label.config(text=f"Number of Matches: {match_count}")
+            self.gap_count_label.config(text=f"Number of Gaps: {gap_count}")
+            self.identity_label.config(text=f"Identity Percentage: {identity}%")
+
         except ValueError:
+            #handle invalid input values
             print("Please enter valid values for match, mismatch, and gap.")
 
     def load_from_fasta(self):
@@ -308,6 +395,63 @@ class AlignmentGUI:
 
         except Exception as e:
             print(f"Error reading FASTA file: {e}")
+
+    def save_result(self):
+        if self.matrix is None or self.path_coordinates is None:
+            return
+
+        strand1 = self.strand1_entry.get().upper()
+        strand2 = self.strand2_entry.get().upper()
+        match = int(self.match_entry.get())
+        mismatch = int(self.mismatch_entry.get())
+        gap = int(self.gap_entry.get())
+
+        aligned1, aligned2 = analyze_alignment(self.matrix, match, mismatch, gap, strand1, strand2)
+
+        if not aligned1 or not aligned2:
+            return
+
+        align_len = len(aligned1)
+        match_count = sum(1 for a, b in zip(aligned1, aligned2) if a == b and a != '-' and b != '-')
+        gap_count = aligned1.count('-') + aligned2.count('-')
+        identity = round((match_count / align_len) * 100, 2)
+
+        # Update GUI labels
+        self.align_len_label.config(text=f"Alignment Length: {align_len}")
+        self.match_count_label.config(text=f"Number of Matches: {match_count}")
+        self.gap_count_label.config(text=f"Number of Gaps: {gap_count}")
+        self.identity_label.config(text=f"Identity Percentage: {identity}%")
+
+        # Save to file
+        save_alignment_to_file("alignment_result.txt", aligned1, aligned2, match, mismatch, gap, align_len, match_count,
+                               gap_count, identity)
+
+    def create_result_display(self):
+        """
+        creates labels to display alignment results and adds the save button below them
+        """
+
+        #create a frame for the result labels and the save button
+        self.result_frame = tk.Frame(self.root)
+        self.result_frame.grid(row=6, column=0, columnspan=7, pady=5)
+
+        #create empty labels for alignment results, updated after clicking run
+        self.align_len_label = tk.Label(self.result_frame, text="")
+        self.align_len_label.pack()
+
+        self.match_count_label = tk.Label(self.result_frame, text="")
+        self.match_count_label.pack()
+
+        self.gap_count_label = tk.Label(self.result_frame, text="")
+        self.gap_count_label.pack()
+
+        self.identity_label = tk.Label(self.result_frame, text="")
+        self.identity_label.pack()
+
+        #create the save button
+        self.save_button = tk.Button(self.result_frame, text="Save Result", command=self.save_result)
+        self.save_button.pack(pady=5)
+
 
 #launching the GUI
 root = tk.Tk()
